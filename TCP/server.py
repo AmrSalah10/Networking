@@ -1,5 +1,4 @@
-import socket
-from concurrent.futures import ThreadPoolExecutor
+import asyncio
 
 RESPONSES = {
     "How are you?": "I am good",
@@ -7,24 +6,29 @@ RESPONSES = {
 }
 CLIENT_IDLE_TIMEOUT_SECONDS = 30
 
-# Create socket
-server_socket = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
-
-# Bind the socket to the address
-server_socket.bind(("127.0.0.1", 8080))
-print("Server is Running on port 8080")
-
-server_socket.listen(5)
-
-def handle_client(client_socket, addr):
+async def handle_client(reader, writer):
+    addr = writer.get_extra_info('peername')
     port = addr[1]
-    client_socket.settimeout(CLIENT_IDLE_TIMEOUT_SECONDS)
+    
+    print('Connection established with Client on Address: ', addr)
+    
+    # fixed message
+    writer.write(b"""
+        I am a simple server please choose your message:
+            1- How are you?
+            2- How is your day?
+            3- Bye (to close the connection)
+    """)
+    await writer.drain()
 
     # each client connection loop  
     while True:
         try:
             # Receive client msg
-            msg = client_socket.recv(1024)
+            msg = await asyncio.wait_for(
+                reader.read(1024),
+                timeout=CLIENT_IDLE_TIMEOUT_SECONDS
+            )
 
             # no message from client (not active)
             if not msg:
@@ -34,41 +38,40 @@ def handle_client(client_socket, addr):
             print("Client (%s):"%port, msg)
 
             if msg == 'Bye':
-                client_socket.send(b"See you next time")
+                writer.write(b"See you next time")
+                await writer.drain()
                 break
 
             # Send Response
-            client_socket.send(RESPONSES.get(msg, "I don't understand you").encode())
+            writer.write(RESPONSES.get(msg, "I don't understand you").encode())
+            await writer.drain()
 
-        except socket.timeout:
+        except asyncio.TimeoutError:
+            writer.write(b"You are dissconected")
+            writer.drain()
             print(f"Client ({port}) timed out after {CLIENT_IDLE_TIMEOUT_SECONDS}s of inactivity")
             break
-        except ConnectionResetError:
+        except (ConnectionResetError, ConnectionAbortedError):
             print('Client (%s) disconnected' %port)
             break
 
-    client_socket.close()    
+    writer.close()
+    await writer.wait_closed()
     print('Connection closed with Client on Address:', addr)
 
-def start_server():
-    with ThreadPoolExecutor(5) as exec:
-        while True:
-            # Accept client connection
-            client_socket, addr = server_socket.accept()
-            
-            print('Connection established with Client on Address: ', addr)
-            
-            # fixed message
-            client_socket.send(b"""
-                I am a simple server please choose your message:
-                    1- How are you?
-                    2- How is your day?
-                    3- Bye (to close the connection)
-            """)
+async def start_server():
+    # Create socket
+    # Bind the socket to the address
+    server = await asyncio.start_server(handle_client, "127.0.0.1", 8080)
 
-            exec.submit(handle_client, client_socket, addr)
+    print("Server is Running on port 8080")
+
+    async with server:
+        await server.serve_forever()
             
 
 if __name__ == '__main__':
-    start_server()
-
+    try:
+        asyncio.run(start_server())
+    except KeyboardInterrupt:
+        print("Server Closed")
