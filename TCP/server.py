@@ -5,6 +5,7 @@ RESPONSES = {
     "How are you?": "I am good",
     "How is your day?": "Very good"
 }
+CLIENT_IDLE_TIMEOUT_SECONDS = 30
 
 # Create socket
 server_socket = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
@@ -17,23 +18,37 @@ server_socket.listen(5)
 
 def handle_client(client_socket, addr):
     port = addr[1]
+    client_socket.settimeout(CLIENT_IDLE_TIMEOUT_SECONDS)
 
     # each client connection loop  
     while True:
-        # Receive client msg
-        msg = client_socket.recv(1024).decode()
-        print("Client (%s):"%port, msg)
+        try:
+            # Receive client msg
+            msg = client_socket.recv(1024)
 
-        # Close connection
-        if msg == 'Bye':
-            client_socket.send(b"See you next time")
-            client_socket.close()
+            # no message from client (not active)
+            if not msg:
+                break
+            
+            msg = msg.decode().strip()
+            print("Client (%s):"%port, msg)
+
+            if msg == 'Bye':
+                client_socket.send(b"See you next time")
+                break
+
+            # Send Response
+            client_socket.send(RESPONSES.get(msg, "I don't understand you").encode())
+
+        except socket.timeout:
+            print(f"Client ({port}) timed out after {CLIENT_IDLE_TIMEOUT_SECONDS}s of inactivity")
+            break
+        except ConnectionResetError:
+            print('Client (%s) disconnected' %port)
             break
 
-        # Send Response
-        client_socket.send(RESPONSES.get(msg, "I don't understand you").encode())
-
-    print('Connection closed with Client on Address: ', addr)
+    client_socket.close()    
+    print('Connection closed with Client on Address:', addr)
 
 def start_server():
     with ThreadPoolExecutor(5) as exec:
@@ -56,3 +71,4 @@ def start_server():
 
 if __name__ == '__main__':
     start_server()
+
