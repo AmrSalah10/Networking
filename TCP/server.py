@@ -1,4 +1,11 @@
 import asyncio
+import logging
+
+logging.basicConfig(
+    level=logging.INFO,
+    format="%(asctime)s [%(levelname)s] %(message)s"
+)
+_logger = logging.getLogger(__name__)
 
 RESPONSES = {
     "How are you?": "I am good",
@@ -6,11 +13,14 @@ RESPONSES = {
 }
 CLIENT_IDLE_TIMEOUT_SECONDS = 30
 
+active_clients = {}
+
 async def handle_client(reader, writer):
     addr = writer.get_extra_info('peername')
     port = addr[1]
+    active_clients[addr] = writer
     
-    print('Connection established with Client on Address: ', addr)
+    _logger.info(f"Connection established with Client on Address: {addr} | Total active: {len(active_clients)}")
     
     # fixed message
     writer.write(b"""
@@ -35,7 +45,7 @@ async def handle_client(reader, writer):
                 break
             
             msg = msg.decode().strip()
-            print("Client (%s):"%port, msg)
+            _logger.info(f"Client ({port}): {msg}")
 
             if msg == 'Bye':
                 writer.write(b"See you next time")
@@ -48,23 +58,27 @@ async def handle_client(reader, writer):
 
         except asyncio.TimeoutError:
             writer.write(b"You are dissconected")
-            writer.drain()
-            print(f"Client ({port}) timed out after {CLIENT_IDLE_TIMEOUT_SECONDS}s of inactivity")
+            await writer.drain()
+            _logger.info(f"Client ({port}) timed out after {CLIENT_IDLE_TIMEOUT_SECONDS}s of inactivity")
             break
         except (ConnectionResetError, ConnectionAbortedError):
-            print('Client (%s) disconnected' %port)
+            _logger.info(f"Client ({port})) disconnected")
             break
+
+    # remove active client
+    active_clients.pop(addr)
 
     writer.close()
     await writer.wait_closed()
-    print('Connection closed with Client on Address:', addr)
+
+    _logger.info(f"Connection closed with Client on Address: {addr} | Total active: {len(active_clients)}")
 
 async def start_server():
     # Create socket
     # Bind the socket to the address
     server = await asyncio.start_server(handle_client, "127.0.0.1", 8080)
 
-    print("Server is Running on port 8080")
+    _logger.info("Server is Running on port 8080")
 
     async with server:
         await server.serve_forever()
@@ -74,4 +88,4 @@ if __name__ == '__main__':
     try:
         asyncio.run(start_server())
     except KeyboardInterrupt:
-        print("Server Closed")
+        _logger.info("Server Closed")
